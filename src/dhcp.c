@@ -404,7 +404,25 @@ void dhcp_packet(time_t now, int pxe_fd)
       memcpy(arp_req.arp_ha.sa_data, mess->chaddr, mess->hlen);
       /* interface name already copied in */
       arp_req.arp_flags = ATF_COM;
-      ioctl(daemon->dhcpfd, SIOCSARP, &arp_req);
+
+      if (ioctl(daemon->dhcpfd, SIOCSARP, &arp_req)) {
+          my_syslog(MS_DHCP | LOG_WARNING, _("DHCP create ARP entry failed, "
+                                             "falling back to broadcast"));
+
+          /* broadcast to 255.255.255.255 (or mac address invalid) */
+          struct in_pktinfo *pkt;
+          msg.msg_control = control_u.control;
+          msg.msg_controllen = sizeof(control_u);
+          cmptr = CMSG_FIRSTHDR(&msg);
+          pkt = (struct in_pktinfo *)CMSG_DATA(cmptr);
+          pkt->ipi_ifindex = iface_index;
+          pkt->ipi_spec_dst.s_addr = 0;
+          msg.msg_controllen = cmptr->cmsg_len = CMSG_LEN(sizeof(struct in_pktinfo));
+          cmptr->cmsg_level = IPPROTO_IP;
+          cmptr->cmsg_type = IP_PKTINFO;
+          dest.sin_addr.s_addr = INADDR_BROADCAST;
+          dest.sin_port = htons(daemon->dhcp_client_port);
+      }
     }
 #elif defined(HAVE_SOLARIS_NETWORK)
   else if ((ntohs(mess->flags) & 0x8000) || mess->hlen != ETHER_ADDR_LEN || mess->htype != ARPHRD_ETHER)
